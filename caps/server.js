@@ -1,67 +1,71 @@
 /*
-The Hub Server has one job – accept all inbound events and data, validate them, and and then re-broadcast them to everyone except the sender. It doesn’t perform any logic other than to ensure that the inbound events are properly formatted before it broadcasts them.
-
-Creates a pool of connected clients
-Accept inbound TCP connections on a declared port
-On new connections, add the client to the connection pool
-On incoming data from a client
-- Read and parse the incoming data/payload
-- Verify that the data is legitimate
-- Is it a JSON object with both an event and payload properties?
-- If the payload is ok, broadcast the raw data back out to each of the other connected clients
+Start a socket.io server on a designated port
+Create and accept connections on a namespace called caps
+Within the namespace:
+  - Monitor the ‘join’ event.
+    -  Each vendor will have their own “room” so that they only get their own delivery notifications
+Monitor the correct general events
+  - pickup, in-transit, delivered
+  - Broadcast the events and payload back out to the appropriate clients in the caps namespace
+    - pickup can go out to all sockets (broadcast it) so that the drivers can hear it
+    - in-transit and delivered are meant to be heard only by the right vendor
+      - Emit those messages and payload only to the room (vendor) for which the message was intended
 */
 
 'use strict';
 
-const net = require('net');
+const io = require('socket.io')(process.env.PORT || 3000);
 
-const port = process.env.PORT || 3000;
-const server = net.createServer();
 
-server.listen(port, () => console.log(`server up on ${port}`));
+io.on('connection', socket => {
 
-let socketPool = {};
+  console.log('CONNECTED', socket.id);
 
-server.on('connection', (socket) => {
+  socket.on('pickup', payload => {
+    let eventName = 'pickup';
+    logEvent(eventName, payload);
+    io.emit('pickup', payload);
+  });
+
+  socket.on('in-transit', payload => {
+    let eventName = 'in-transit';
+    logEvent(eventName, payload);
+    confirmTransit(payload);
+  });
+
+  socket.on('delivered', payload => {
+    let eventName = 'delivered';
+    logEvent(eventName, payload);
+    confirmDelivery(payload);
+  });
+
+});
+
+
+const store = io.of('/flowers');
+store.on('connection', socket => {
   
-  const id = `Socket-${Math.random()}`;
-
-  socketPool[id] = socket;
-
-  socket.on('data', buffer => onMessageReceived(buffer.toString()));
-
-  socket.on('error', (error) => {
-    console.log('SOCKET ERROR', error);
+  console.log('STORE CHANNEL', socket.id);
+  
+  socket.on('join', room => {
+    console.log('joined', room);
+    socket.join(room);
   });
-  //if there are issues, try changing 'end' to 'close' 
-  socket.on('end', (e) => {
-    delete socketPool[id];
-  });
+
+
 });
 
-server.on('error', (error) => {
-  console.log('SERVER ERROR', error.message);
-});
 
-function onMessageReceived(str){
-
-  logEvent(str);
-  broadcast(str);
-
-}
-
-function logEvent(str){
-
-  const messageObject = JSON.parse(str);
-  const eventName = messageObject.event;
+function logEvent(eventName, payload){
   const time = new Date();
-  const payload = messageObject.payload;
-
   console.log('EVENT', {event: eventName, time, payload});
 }
 
-function broadcast(str){
-  for(let socket in socketPool){
-    socketPool[socket].write(str);
-  }
+function confirmTransit(payload){
+  store.to('1-206-flowers').emit('in-transit', payload);
+}
+
+function confirmDelivery(payload){
+  store.to('1-206-flowers').emit('delivered', payload);
+
 }

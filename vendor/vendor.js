@@ -1,35 +1,26 @@
 /*
-This application is intended to be run by store owners. As soon as they have a package ready for pickup/delivery, they will be sending an event to the hub server with the data describing the delivery. Additionally, the application needs to be listening to the server for other events. Store owners definitely want to know when their packages are picked up, and when they actually get delivered.
-
-Application Workflow
-
-Use .env to set your store name
-Connect to the CAPS server
-Every 5 seconds, simulate a new customer order
-Create an order object with your store name, order id, customer name, address
-HINT: Have some fun by using the faker library to make up phony information
-Create a message object with the following keys:
-event - ‘pickup’
-payload - the order object you created in the above step
-Write that message (as a string) to the CAPS server
-Listen for the data event coming in from the CAPS server
-When data arrives, parse it (it should be JSON) and look for the event property
-If the event is called delivered
-Log “thank you for delivering id” to the console
-Ignore any data that specifies a different event
+Continue to declare your store id using .env
+Connects to the CAPS server as a socket.io client to the caps namespace
+Join a room named for your store
+  - Emit a join event to the caps namespace connection, with the payload being your store code
+Every .5 seconds, simulate a new customer order
+  - Create a payload object with your store name, order id, customer name, address
+  - Emit that message to the CAPS server with an event called pickup
+Listen for the delivered event coming in from the CAPS server
+  - Log “thank you for delivering payload.id” to the console
 */
 
 'use strict';
 const faker = require('faker');
 
-const net = require('net');
-const client = new net.Socket();
+const io = require('socket.io-client');
 
-const host = process.env.HOST || 'localhost';
-const port = process.env.PORT || 3000;
-client.connect(port, host, () => {});
+const socket = io.connect('http://localhost:3000');
+const storeChannel = io.connect('http://localhost:3000/flowers');
 
-const store = process.env.STORE_NAME || 'Rose-Emporium';
+storeChannel.emit('join', '1-206-flowers');
+
+const store = process.env.STORE_NAME || '1-206-flowers';
 let orderId = faker.random.uuid();
 let customerName = faker.name.findName();
 let address = faker.address.streetAddress();
@@ -44,18 +35,11 @@ const Order = {
 setInterval(start, 5000);
 
 function start(){
-
-  let event = JSON.stringify({event: 'pickup', payload: Order});
-  client.write(event);
-
+  socket.emit('pickup', Order);
 }
 
-client.on('data', function(data){
+storeChannel.on('delivered', payload => {
+  console.log(`VENDOR: Thank you for delivering ${payload.orderId}`);
+});
 
-  let event = JSON.parse(data);
-
-  if (event.event === 'delivered'){
-    console.log(`VENDOR: Thank you for delivering ${event.payload.orderId}`);
-  }
-
-})
+module.exports = {start};
